@@ -1,5 +1,5 @@
 [workspace]
-members = ["zopfli-core", "zopfli-ffi"]
+members = ["zopfli-core", "zopfli-ffi", "zopflipng", "zopflipng-ffi"]
 resolver = "2"
 
 [workspace.package]

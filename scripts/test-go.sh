@@ -8,8 +8,7 @@ REPO="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # Build workspace libs (libzopfli.a / libzopflipng.a under rust/target/release).
 "${SCRIPT_DIR}/build-rust.sh"
 
-# Until the workspace is unified, Agent 2 may only emit libzopflipng.a from
-# rust/zopflipng-ffi. Build that crate in-place if the workspace output is absent.
+# Fallback if a crate was built outside the workspace target dir.
 if [[ ! -f "${REPO}/rust/target/release/libzopflipng.a" ]] \
    && [[ -f "${REPO}/rust/zopflipng-ffi/Cargo.toml" ]]; then
   echo "libzopflipng.a not in rust/target/release; building rust/zopflipng-ffi" >&2
@@ -45,7 +44,6 @@ fi
 if [[ -z "${ZOPFLIPNG_LIB}" ]]; then
   echo "error: libzopflipng.a not found." >&2
   echo "Looked in rust/target/release, then rust/zopflipng-ffi/target/release." >&2
-  echo "If Agent 2 has not landed rust/zopflipng-ffi yet, make test-go cannot run." >&2
   exit 1
 fi
 

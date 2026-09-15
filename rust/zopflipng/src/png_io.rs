@@ -12,7 +12,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
 use std::io::{Cursor, Read, Write};
-use std::num::NonZeroU64;
 
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
@@ -285,16 +284,11 @@ fn flate2_zlib(data: &[u8], level: u32) -> Result<Vec<u8>, Error> {
 }
 
 fn zopfli_zlib(data: &[u8], iterations: u64) -> Result<Vec<u8>, Error> {
-    let mut opts = zopfli::Options::default();
-    opts.iteration_count = NonZeroU64::new(iterations.max(1)).expect("iterations >= 1");
-    // Write the whole buffer in one go so Zopfli sees a complete window.
-    let mut encoder = zopfli::ZlibEncoder::new(opts, zopfli::BlockType::Dynamic, Vec::new())
-        .map_err(|e| Error::Encode(format!("zopfli: {e}")))?;
-    encoder
-        .write_all(data)
-        .map_err(|e| Error::Encode(format!("zopfli: {e}")))?;
-    encoder
-        .finish()
+    let opts = zopfli_core::Options {
+        numiterations: iterations.max(1) as i32,
+        ..zopfli_core::Options::default()
+    };
+    zopfli_core::compress_bytes(opts, zopfli_core::Format::Zlib, data)
         .map_err(|e| Error::Encode(format!("zopfli: {e}")))
 }
 

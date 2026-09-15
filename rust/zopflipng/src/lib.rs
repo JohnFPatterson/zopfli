@@ -12,7 +12,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 //
 // Rust port of src/zopflipng/zopflipng_lib.cc. Decode/encode uses the `png`
-// crate; IDAT zlib payloads are produced with the crates.io `zopfli` crate.
+// crate; IDAT zlib payloads are produced with in-tree `zopfli-core`.
 
 //! PNG optimizer using Zopfli deflate compression.
 //!
