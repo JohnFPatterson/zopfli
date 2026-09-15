@@ -1,0 +1,4 @@
+{
+  "name": "Zopfli",
+  "install": "bash .cursor/install.sh"
+}
