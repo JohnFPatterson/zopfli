@@ -1,10 +1,10 @@
-# Rust build output (workspace and per-crate fallbacks)
-rust/target/
+# Rust build artifacts
+/rust/target/
+# Per-crate fallback (Agent 2 may emit libzopflipng.a outside the workspace)
 rust/*/target/
 
 # Cargo backup / incremental junk
 **/*.rs.bk
-*.rlib
 
 # C object files from the Makefile
 *.o
