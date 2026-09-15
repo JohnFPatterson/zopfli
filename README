@@ -37,3 +37,15 @@ please use the build instructions above instead.
 
 Zopfli Compression Algorithm was created by Lode Vandevenne and Jyrki
 Alakuijala, based on an algorithm by Jyrki Alakuijala.
+
+## Rust port and Go tests
+
+The C/C++ sources under src/ remain. A Rust reimplementation lives under rust/
+and exposes the same C ABI (`ZopfliCompress`, `CZopfliPNGOptimize`) so the Go
+packages in go/zopfli and go/zopflipng stay unchanged.
+
+    make rust      # cargo build --release
+    make test-go   # run both Go test packages against the Rust staticlibs
+
+Note that output is not required to be byte-identical to the C implementation;
+Go tests check valid gzip round-trip / smaller PNG.

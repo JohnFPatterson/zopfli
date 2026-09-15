@@ -1,0 +1,11 @@
+# Rust build artifacts
+/rust/target/
+# Per-crate fallback if a crate is built outside the workspace target dir
+rust/*/target/
+
+# Cargo backup / incremental junk
+**/*.rs.bk
+
+# C object files from the Makefile
+*.o
+obj/
