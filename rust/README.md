@@ -21,6 +21,8 @@ The C header is `zopfli-ffi/include/zopfli.h` (unchanged copy of `src/zopfli/zop
 REPO=$(git rev-parse --show-toplevel)
 export CGO_CFLAGS="-I${REPO}/rust/zopfli-ffi/include"
 export CGO_LDFLAGS="-L${REPO}/rust/target/release -lzopfli -lm"
+# This repo has no go.mod (owned by another agent). GOPATH mode is required:
+export GO111MODULE=off
 cd ${REPO}/go/zopfli && go test -v
 ```
 
