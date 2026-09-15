@@ -20,7 +20,7 @@ ZOPFLIPNGLIB_OBJ := $(patsubst %.cc,obj/%.o,$(ZOPFLIPNGLIB_SRC))
 ZOPFLIPNGBIN_SRC := src/zopflipng/zopflipng_bin.cc
 ZOPFLIPNGBIN_OBJ := $(patsubst %.cc,obj/%.o,$(ZOPFLIPNGBIN_SRC))
 
-.PHONY: all libzopfli libzopflipng
+.PHONY: all libzopfli libzopflipng rust test-go
 
 all: zopfli libzopfli libzopfli.a zopflipng libzopflipng libzopflipng.a
 
@@ -63,3 +63,11 @@ libzopflipng.a: $(LODEPNG_OBJ) $(ZOPFLIPNGLIB_OBJ)
 # Remove all libraries and binaries
 clean:
 	rm -f zopflipng zopfli $(ZOPFLILIB_OBJ) $(ZOPFLIBIN_OBJ) $(LODEPNG_OBJ) $(ZOPFLIPNGLIB_OBJ) $(ZOPFLIPNGBIN_OBJ) libzopfli*
+
+# Rust staticlibs (rust/) and Go CGO tests against them. Existing C/C++ targets
+# above are unchanged. Requires rust/Cargo.toml from the workspace crates.
+rust:
+	./scripts/build-rust.sh
+
+test-go: rust
+	./scripts/test-go.sh

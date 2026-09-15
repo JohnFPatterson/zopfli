@@ -1,0 +1,11 @@
+# Rust build output (workspace and per-crate fallbacks)
+rust/target/
+rust/*/target/
+
+# Cargo backup / incremental junk
+**/*.rs.bk
+*.rlib
+
+# C object files from the Makefile
+*.o
+obj/
