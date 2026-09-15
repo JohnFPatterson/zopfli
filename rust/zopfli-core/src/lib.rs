@@ -12,18 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Core Zopfli compression wrapper around the crates.io `zopfli` crate.
+//! Core Zopfli compression.
 //!
-//! Option defaults match C `ZopfliInitOptions` in `src/zopfli/util.c`.
+//! The public gzip/zlib/deflate wrappers still go through the crates.io `zopfli`
+//! crate. The squeeze / optimal LZ77 implementation is a first-party port of
+//! `src/zopfli/squeeze.c` and the helpers it needs.
 
 use std::num::NonZeroU64;
+
+mod cache;
+mod deflate;
+mod hash;
+mod katajainen;
+mod lz77;
+mod squeeze;
+mod symbols;
+mod tree;
+mod util;
+
+pub use cache::LongestMatchCache;
+pub use deflate::calculate_block_size;
+pub use hash::ZopfliHash;
+pub use lz77::{lz77_greedy, BlockState, Lz77Store};
+pub use squeeze::{lz77_optimal, lz77_optimal_fixed};
+pub use util::{
+    ZOPFLI_CACHE_LENGTH, ZOPFLI_LARGE_FLOAT, ZOPFLI_MAX_CHAIN_HITS, ZOPFLI_MAX_MATCH,
+    ZOPFLI_MIN_MATCH, ZOPFLI_NUM_D, ZOPFLI_NUM_LL, ZOPFLI_WINDOW_MASK, ZOPFLI_WINDOW_SIZE,
+};
 
 /// Options corresponding to C `ZopfliOptions`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Options {
-    /// Whether to print output (unused by the Rust backend).
+    /// Whether to print output.
     pub verbose: i32,
-    /// Whether to print more detailed output (unused by the Rust backend).
+    /// Whether to print more detailed output.
     pub verbose_more: i32,
     /// Maximum LZ77 optimization iterations (C default: 15).
     pub numiterations: i32,
@@ -51,8 +73,8 @@ impl Default for Options {
 impl Options {
     /// Maps C-style options onto `zopfli::Options`.
     pub fn to_zopfli_options(self) -> zopfli::Options {
-        let iterations = NonZeroU64::new((self.numiterations.max(1)) as u64)
-            .unwrap_or(NonZeroU64::MIN);
+        let iterations =
+            NonZeroU64::new((self.numiterations.max(1)) as u64).unwrap_or(NonZeroU64::MIN);
         zopfli::Options {
             iteration_count: iterations,
             iterations_without_improvement: iterations,
