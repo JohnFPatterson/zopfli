@@ -83,8 +83,7 @@ unsafe fn options_from_c(png_options: *const CZopfliPNGOptions) -> Result<Option
                 continue;
             }
             let s = std::ffi::CStr::from_ptr(p);
-            opts.keepchunks
-                .push(s.to_string_lossy().into_owned());
+            opts.keepchunks.push(s.to_string_lossy().into_owned());
         }
     }
 
@@ -98,7 +97,11 @@ pub unsafe extern "C" fn CZopfliPNGSetDefaults(png_options: *mut CZopfliPNGOptio
         if png_options.is_null() {
             return;
         }
-        ptr::write_bytes(png_options as *mut u8, 0, std::mem::size_of::<CZopfliPNGOptions>());
+        ptr::write_bytes(
+            png_options as *mut u8,
+            0,
+            std::mem::size_of::<CZopfliPNGOptions>(),
+        );
         let defaults = Options::default();
         let o = &mut *png_options;
         o.lossy_transparent = defaults.lossy_transparent as c_int;

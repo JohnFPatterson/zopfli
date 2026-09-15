@@ -11,11 +11,13 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
 use std::num::NonZeroU64;
 
 use flate2::read::ZlibDecoder;
-use png::{AdaptiveFilterType, BitDepth, ColorType, FilterType};
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
+use png::{BitDepth, ColorType};
 
 use crate::color::EncodeSpec;
 use crate::{Error, FilterStrategy};
@@ -139,81 +141,161 @@ fn expand_to_rgba(
     }
 }
 
-#[derive(Clone, Copy)]
-enum FilterChoice {
-    Fixed(FilterType),
-    Adaptive,
-}
-
-fn map_strategy(strategy: FilterStrategy) -> FilterChoice {
-    match strategy {
-        FilterStrategy::Zero => FilterChoice::Fixed(FilterType::NoFilter),
-        FilterStrategy::One => FilterChoice::Fixed(FilterType::Sub),
-        FilterStrategy::Two => FilterChoice::Fixed(FilterType::Up),
-        FilterStrategy::Three => FilterChoice::Fixed(FilterType::Avg),
-        FilterStrategy::Four => FilterChoice::Fixed(FilterType::Paeth),
-        FilterStrategy::MinSum
-        | FilterStrategy::Entropy
-        | FilterStrategy::Predefined
-        | FilterStrategy::BruteForce => FilterChoice::Adaptive,
+fn color_type_code(color: ColorType) -> u8 {
+    match color {
+        ColorType::Grayscale => 0,
+        ColorType::Rgb => 2,
+        ColorType::Indexed => 3,
+        ColorType::GrayscaleAlpha => 4,
+        ColorType::Rgba => 6,
     }
 }
 
-pub(crate) fn encode_png(
-    spec: &EncodeSpec,
-    width: u32,
-    height: u32,
+fn bit_depth_code(depth: BitDepth) -> u8 {
+    match depth {
+        BitDepth::One => 1,
+        BitDepth::Two => 2,
+        BitDepth::Four => 4,
+        BitDepth::Eight => 8,
+        BitDepth::Sixteen => 16,
+    }
+}
+
+fn paeth(a: u8, b: u8, c: u8) -> u8 {
+    let ia = a as i16;
+    let ib = b as i16;
+    let ic = c as i16;
+    let p = ia + ib - ic;
+    let pa = (p - ia).abs();
+    let pb = (p - ib).abs();
+    let pc = (p - ic).abs();
+    if pa <= pb && pa <= pc {
+        a
+    } else if pb <= pc {
+        b
+    } else {
+        c
+    }
+}
+
+fn filter_row(filter: u8, bpp: usize, prev: &[u8], curr: &[u8], out: &mut [u8]) {
+    out[0] = filter;
+    for i in 0..curr.len() {
+        let x = curr[i];
+        let a = if i >= bpp { curr[i - bpp] } else { 0 };
+        let b = prev[i];
+        let c = if i >= bpp { prev[i - bpp] } else { 0 };
+        out[i + 1] = match filter {
+            1 => x.wrapping_sub(a),
+            2 => x.wrapping_sub(b),
+            3 => x.wrapping_sub(((u16::from(a) + u16::from(b)) / 2) as u8),
+            4 => x.wrapping_sub(paeth(a, b, c)),
+            _ => x,
+        };
+    }
+}
+
+fn abs_sum(filtered: &[u8]) -> u64 {
+    filtered
+        .iter()
+        .map(|b| i8::from_le_bytes([*b]).unsigned_abs() as u64)
+        .sum()
+}
+
+fn shannon_score(filtered: &[u8]) -> u64 {
+    let mut counts = [0u32; 256];
+    for &b in filtered {
+        counts[b as usize] += 1;
+    }
+    let n = filtered.len() as f64;
+    let mut ent = 0.0f64;
+    for c in counts {
+        if c > 0 {
+            let p = f64::from(c) / n;
+            ent -= p * p.log2();
+        }
+    }
+    (ent * 1_000_000.0) as u64
+}
+
+fn pick_row_filter(bpp: usize, prev: &[u8], curr: &[u8], entropy: bool) -> u8 {
+    let mut best = 0u8;
+    let mut best_score = u64::MAX;
+    let mut tmp = vec![0u8; curr.len() + 1];
+    for f in 0..5u8 {
+        filter_row(f, bpp, prev, curr, &mut tmp);
+        let score = if entropy {
+            shannon_score(&tmp[1..])
+        } else {
+            abs_sum(&tmp[1..])
+        };
+        if score < best_score {
+            best_score = score;
+            best = f;
+        }
+    }
+    best
+}
+
+fn filter_image(
+    pixels: &[u8],
+    width: usize,
+    height: usize,
+    bpp: usize,
     strategy: FilterStrategy,
-    compression: png::Compression,
-) -> Result<Vec<u8>, Error> {
-    let mut buf = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut buf, width, height);
-        encoder.set_color(spec.color);
-        encoder.set_depth(spec.depth);
-        encoder.set_compression(compression);
-        match map_strategy(strategy) {
-            FilterChoice::Fixed(filter) => {
-                encoder.set_adaptive_filter(AdaptiveFilterType::NonAdaptive);
-                encoder.set_filter(filter);
+    orig_filters: Option<&[u8]>,
+) -> Vec<u8> {
+    let stride = width * bpp;
+    let mut out = vec![0u8; height * (1 + stride)];
+    let zeros = vec![0u8; stride];
+    for y in 0..height {
+        let curr = &pixels[y * stride..(y + 1) * stride];
+        let prev = if y == 0 {
+            zeros.as_slice()
+        } else {
+            &pixels[(y - 1) * stride..y * stride]
+        };
+        let dest = &mut out[y * (1 + stride)..(y + 1) * (1 + stride)];
+        let filter = match strategy {
+            FilterStrategy::Zero => 0,
+            FilterStrategy::One => 1,
+            FilterStrategy::Two => 2,
+            FilterStrategy::Three => 3,
+            FilterStrategy::Four => 4,
+            FilterStrategy::MinSum | FilterStrategy::BruteForce => {
+                pick_row_filter(bpp, prev, curr, false)
             }
-            FilterChoice::Adaptive => {
-                encoder.set_adaptive_filter(AdaptiveFilterType::Adaptive);
-            }
-        }
-        if let Some(ref pal) = spec.palette {
-            encoder.set_palette(pal.clone());
-        }
-        if let Some(ref trns) = spec.trns {
-            encoder.set_trns(trns.clone());
-        }
-        let mut writer = encoder
-            .write_header()
-            .map_err(|e| Error::Encode(e.to_string()))?;
-        writer
-            .write_image_data(&spec.pixels)
-            .map_err(|e| Error::Encode(e.to_string()))?;
-        writer.finish().map_err(|e| Error::Encode(e.to_string()))?;
+            FilterStrategy::Entropy => pick_row_filter(bpp, prev, curr, true),
+            FilterStrategy::Predefined => orig_filters
+                .and_then(|f| f.get(y).copied())
+                .filter(|f| *f <= 4)
+                .unwrap_or(0),
+        };
+        filter_row(filter, bpp, prev, curr, dest);
     }
-    Ok(buf)
+    out
 }
 
-fn inflate_zlib(data: &[u8]) -> Result<Vec<u8>, Error> {
-    let mut decoder = ZlibDecoder::new(data);
-    let mut out = Vec::new();
-    decoder
-        .read_to_end(&mut out)
-        .map_err(|e| Error::Encode(format!("inflate IDAT: {e}")))?;
-    Ok(out)
+fn flate2_zlib(data: &[u8], level: u32) -> Result<Vec<u8>, Error> {
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(level));
+    encoder
+        .write_all(data)
+        .map_err(|e| Error::Encode(e.to_string()))?;
+    encoder.finish().map_err(|e| Error::Encode(e.to_string()))
 }
 
 fn zopfli_zlib(data: &[u8], iterations: u64) -> Result<Vec<u8>, Error> {
     let mut opts = zopfli::Options::default();
     opts.iteration_count = NonZeroU64::new(iterations.max(1)).expect("iterations >= 1");
-    let mut out = Vec::new();
-    zopfli::compress(opts, zopfli::Format::Zlib, data, &mut out)
+    // Write the whole buffer in one go so Zopfli sees a complete window.
+    let mut encoder = zopfli::ZlibEncoder::new(opts, zopfli::BlockType::Dynamic, Vec::new())
         .map_err(|e| Error::Encode(format!("zopfli: {e}")))?;
-    Ok(out)
+    encoder
+        .write_all(data)
+        .map_err(|e| Error::Encode(format!("zopfli: {e}")))?;
+    encoder
+        .finish()
+        .map_err(|e| Error::Encode(format!("zopfli: {e}")))
 }
 
 fn write_chunk(out: &mut Vec<u8>, ty: &[u8; 4], data: &[u8]) {
@@ -224,6 +306,82 @@ fn write_chunk(out: &mut Vec<u8>, ty: &[u8; 4], data: &[u8]) {
     hasher.update(ty);
     hasher.update(data);
     out.extend_from_slice(&hasher.finalize().to_be_bytes());
+}
+
+fn assemble_png(spec: &EncodeSpec, width: u32, height: u32, idat: &[u8]) -> Vec<u8> {
+    let mut out = PNG_SIG.to_vec();
+    let mut ihdr = Vec::with_capacity(13);
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&height.to_be_bytes());
+    ihdr.push(bit_depth_code(spec.depth));
+    ihdr.push(color_type_code(spec.color));
+    ihdr.extend_from_slice(&[0, 0, 0]); // compression, filter, interlace
+    write_chunk(&mut out, b"IHDR", &ihdr);
+    if let Some(ref pal) = spec.palette {
+        write_chunk(&mut out, b"PLTE", pal);
+    }
+    if let Some(ref trns) = spec.trns {
+        write_chunk(&mut out, b"tRNS", trns);
+    }
+    write_chunk(&mut out, b"IDAT", idat);
+    write_chunk(&mut out, b"IEND", &[]);
+    out
+}
+
+fn filtered_scanlines(
+    spec: &EncodeSpec,
+    width: u32,
+    height: u32,
+    strategy: FilterStrategy,
+    orig_filters: Option<&[u8]>,
+) -> Vec<u8> {
+    filter_image(
+        &spec.pixels,
+        width as usize,
+        height as usize,
+        spec.bytes_per_pixel(),
+        strategy,
+        orig_filters,
+    )
+}
+
+/// Cheap zlib (level 1) of filtered scanlines — analogue of C++ window=8192, no Zopfli.
+pub(crate) fn cheap_encode(
+    spec: &EncodeSpec,
+    width: u32,
+    height: u32,
+    strategy: FilterStrategy,
+    orig_filters: Option<&[u8]>,
+) -> Result<Vec<u8>, Error> {
+    let filtered = filtered_scanlines(spec, width, height, strategy, orig_filters);
+    let idat = flate2_zlib(&filtered, 1)?;
+    Ok(assemble_png(spec, width, height, &idat))
+}
+
+pub(crate) fn best_encode(
+    spec: &EncodeSpec,
+    width: u32,
+    height: u32,
+    strategy: FilterStrategy,
+    orig_filters: Option<&[u8]>,
+) -> Result<Vec<u8>, Error> {
+    let filtered = filtered_scanlines(spec, width, height, strategy, orig_filters);
+    let idat = flate2_zlib(&filtered, 9)?;
+    Ok(assemble_png(spec, width, height, &idat))
+}
+
+/// Filter scanlines then compress the IDAT zlib payload with Zopfli (32 KiB window).
+pub(crate) fn encode_zopfli(
+    spec: &EncodeSpec,
+    width: u32,
+    height: u32,
+    strategy: FilterStrategy,
+    orig_filters: Option<&[u8]>,
+    iterations: u64,
+) -> Result<Vec<u8>, Error> {
+    let filtered = filtered_scanlines(spec, width, height, strategy, orig_filters);
+    let idat = zopfli_zlib(&filtered, iterations)?;
+    Ok(assemble_png(spec, width, height, &idat))
 }
 
 fn concat_idat(png: &[u8]) -> Result<Vec<u8>, Error> {
@@ -240,38 +398,36 @@ fn concat_idat(png: &[u8]) -> Result<Vec<u8>, Error> {
     Ok(idat)
 }
 
-/// Recompress the filtered IDAT payload with Zopfli zlib (window size 32768).
-pub(crate) fn recompress_idat_zopfli(png: &[u8], iterations: u64) -> Result<Vec<u8>, Error> {
-    let idat = concat_idat(png)?;
-    let filtered = inflate_zlib(&idat)?;
-    let compressed = zopfli_zlib(&filtered, iterations)?;
-    replace_idat(png, &compressed)
-}
-
-fn replace_idat(png: &[u8], new_idat: &[u8]) -> Result<Vec<u8>, Error> {
-    if png.len() < 8 || &png[0..8] != PNG_SIG {
-        return Err(Error::Encode("not a PNG file".into()));
-    }
-    let mut out = png[0..8].to_vec();
-    let mut written_idat = false;
-    for_each_chunk(png, |ty, _data, raw| {
-        if ty == b"IDAT" {
-            if !written_idat {
-                write_chunk(&mut out, b"IDAT", new_idat);
-                written_idat = true;
-            }
-        } else {
-            out.extend_from_slice(raw);
-        }
-        Ok(())
-    })?;
-    if !written_idat {
-        return Err(Error::Encode("PNG has no IDAT".into()));
-    }
+fn inflate_zlib(data: &[u8]) -> Result<Vec<u8>, Error> {
+    let mut decoder = ZlibDecoder::new(data);
+    let mut out = Vec::new();
+    decoder
+        .read_to_end(&mut out)
+        .map_err(|e| Error::Encode(format!("inflate IDAT: {e}")))?;
     Ok(out)
 }
 
-fn for_each_chunk(
+/// Per-row filter bytes from the original file (`kStrategyPredefined`).
+pub(crate) fn extract_filter_bytes(png: &[u8]) -> Result<Vec<u8>, Error> {
+    let (width, height, bit_depth, color) = ihdr_meta(png)?;
+    if bit_depth != 8 {
+        return Err(Error::Decode("predefined filters need 8-bit input".into()));
+    }
+    let bpp = match color {
+        ColorType::Grayscale | ColorType::Indexed => 1,
+        ColorType::GrayscaleAlpha => 2,
+        ColorType::Rgb => 3,
+        ColorType::Rgba => 4,
+    };
+    let stride = 1 + width as usize * bpp;
+    let raw = inflate_zlib(&concat_idat(png)?)?;
+    if raw.len() != stride * height as usize {
+        return Err(Error::Decode("unexpected IDAT size for filters".into()));
+    }
+    Ok((0..height as usize).map(|y| raw[y * stride]).collect())
+}
+
+pub(crate) fn for_each_chunk(
     png: &[u8],
     mut f: impl FnMut(&[u8; 4], &[u8], &[u8]) -> Result<(), Error>,
 ) -> Result<(), Error> {
@@ -356,21 +512,14 @@ pub(crate) fn keep_chunks(
     Ok(())
 }
 
-/// Cheap deflate pass used to pick a filter strategy (C++ uses window size 8192, no Zopfli).
-pub(crate) fn cheap_encode(
-    spec: &EncodeSpec,
-    width: u32,
-    height: u32,
-    strategy: FilterStrategy,
-) -> Result<Vec<u8>, Error> {
-    encode_png(spec, width, height, strategy, png::Compression::Fast)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-pub(crate) fn best_encode(
-    spec: &EncodeSpec,
-    width: u32,
-    height: u32,
-    strategy: FilterStrategy,
-) -> Result<Vec<u8>, Error> {
-    encode_png(spec, width, height, strategy, png::Compression::Best)
+    #[test]
+    fn zopfli_zlib_shrinks_zeros() {
+        let data = vec![0u8; 10_000];
+        let out = zopfli_zlib(&data, 5).unwrap();
+        assert!(out.len() < 64, "got {} bytes", out.len());
+    }
 }

@@ -28,7 +28,8 @@ use std::fmt;
 use color::{choose_color_mode, lossy_optimize_transparent, truecolor_fallback, EncodeSpec};
 use png::ColorType;
 use png_io::{
-    best_encode, cheap_encode, decode_rgba, keep_chunks, recompress_idat_zopfli, DecodedPng,
+    best_encode, cheap_encode, decode_rgba, encode_zopfli, extract_filter_bytes, keep_chunks,
+    DecodedPng,
 };
 
 /// PNG filter strategies from `zopflipng_lib.h`.
@@ -170,11 +171,12 @@ fn auto_choose_filter(
     width: u32,
     height: u32,
     candidates: &[FilterStrategy],
+    orig_filters: Option<&[u8]>,
     verbose: bool,
 ) -> Result<FilterStrategy, Error> {
     let mut best: Option<(FilterStrategy, usize)> = None;
     for &strategy in candidates {
-        let encoded = cheap_encode(spec, width, height, strategy)?;
+        let encoded = cheap_encode(spec, width, height, strategy, orig_filters)?;
         if verbose {
             println!(
                 "Filter strategy {} (fast): {} bytes",
@@ -195,14 +197,14 @@ fn try_optimize(
     width: u32,
     height: u32,
     strategy: FilterStrategy,
+    orig_filters: Option<&[u8]>,
     use_zopfli: bool,
     iterations: u64,
 ) -> Result<Vec<u8>, Error> {
     if use_zopfli {
-        let cheap = cheap_encode(spec, width, height, strategy)?;
-        recompress_idat_zopfli(&cheap, iterations)
+        encode_zopfli(spec, width, height, strategy, orig_filters, iterations)
     } else {
-        best_encode(spec, width, height, strategy)
+        best_encode(spec, width, height, strategy, orig_filters)
     }
 }
 
@@ -230,9 +232,7 @@ pub fn optimize(origpng: &[u8], options: &Options, verbose: bool) -> Result<Vec<
         .any(|c| c == "bKGD" || c == "sBIT")
     {
         if !keep_colortype && verbose {
-            println!(
-                "Forced to keep original color type due to keeping bKGD or sBIT chunk."
-            );
+            println!("Forced to keep original color type due to keeping bKGD or sBIT chunk.");
         }
         keep_colortype = true;
     }
@@ -246,10 +246,12 @@ pub fn optimize(origpng: &[u8], options: &Options, verbose: bool) -> Result<Vec<
     }
 
     let spec = choose_color_mode(&rgba, width, height, keep_colortype, src_color);
+    let orig_filters = extract_filter_bytes(origpng).ok();
+    let orig_filters = orig_filters.as_deref();
     let mut strategies = enabled_strategies(options);
 
     if options.auto_filter_strategy {
-        let winner = auto_choose_filter(&spec, width, height, &strategies, verbose)?;
+        let winner = auto_choose_filter(&spec, width, height, &strategies, orig_filters, verbose)?;
         strategies = vec![winner];
     }
 
@@ -268,15 +270,12 @@ pub fn optimize(origpng: &[u8], options: &Options, verbose: bool) -> Result<Vec<
             width,
             height,
             strategy,
+            orig_filters,
             options.use_zopfli,
             iterations,
         )?;
         if verbose {
-            println!(
-                "Filter strategy {}: {} bytes",
-                strategy.name(),
-                out.len()
-            );
+            println!("Filter strategy {}: {} bytes", strategy.name(), out.len());
         }
         if best.as_ref().map_or(true, |b| out.len() < b.len()) {
             best = Some(out);
@@ -295,6 +294,7 @@ pub fn optimize(origpng: &[u8], options: &Options, verbose: bool) -> Result<Vec<
             width,
             height,
             strategy,
+            orig_filters,
             options.use_zopfli,
             iterations,
         ) {

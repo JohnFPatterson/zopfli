@@ -76,11 +76,17 @@ Build a throwaway C `libzopfli.a` from this repo (do not commit `obj/` or C-buil
 make libzopfli.a
 cargo build --release --manifest-path rust/zopflipng-ffi/Cargo.toml
 
+# go/ has no go.mod; module mode needs a throwaway module file, or GOPATH.
 cd go/zopflipng
-CGO_CFLAGS="-I../../src/zopflipng" \
-CGO_LDFLAGS="-L../../rust/zopflipng-ffi/target/release -L../.. -lzopflipng -lzopfli -lm -ldl -lpthread" \
+printf 'module github.com/google/zopfli/go/zopflipng\n\ngo 1.22\n' > go.mod   # do not commit
+CGO_ENABLED=1 \
+CGO_CFLAGS="-I$(pwd)/../../src/zopflipng" \
+CGO_LDFLAGS="-L$(pwd)/../../rust/zopflipng-ffi/target/release -L$(pwd)/../.. -ldl -lpthread" \
 go test -count=1 -timeout 180s
+rm go.mod
 ```
+
+`#cgo LDFLAGS` in `zopflipng.go` already has `-lzopflipng -lzopfli -lstdc++ -lm`. The extra `-L` paths locate the Rust `libzopflipng.a` and the C `libzopfli.a` linker stand-in. `-lstdc++` is unused for the Rust staticlib but is harmless.
 
 If the workspace layout is used, point `-L` at `rust/target/release` instead.
 

@@ -60,6 +60,12 @@ fn compress_zoidberg_shrinks_and_stays_valid() {
     let output = zopflipng::optimize(&input, &zopflipng::Options::default(), false)
         .expect("optimize should succeed");
 
+    println!(
+        "zoidberg.png: {} -> {} bytes ({:.1}% of original)",
+        input.len(),
+        output.len(),
+        100.0 * output.len() as f64 / input.len() as f64
+    );
     assert!(
         output.len() < input.len(),
         "ZopfliPNG did not compress png: in={} out={}",
