@@ -6,6 +6,8 @@
 //! then sets the bit pointer to 0 and appends LEN, NLEN, and the payload as
 //! whole bytes, leaving unused high bits in the header byte as zero.
 
+#![allow(clippy::too_many_arguments)]
+
 use crate::blocksplitter::{block_split, block_split_lz77};
 use crate::consts::{MASTER_BLOCK_SIZE, NUM_D, NUM_LL};
 use crate::lz77::{BlockState, Lz77Store};
@@ -53,8 +55,8 @@ fn add_huffman_bits(symbol: u32, length: u32, bp: &mut u8, out: &mut Vec<u8>) {
 /// Ensure at least two non-zero distance codes for buggy decoders.
 fn patch_distance_codes_for_buggy_decoders(d_lengths: &mut [u32]) {
     let mut num_dist_codes = 0i32;
-    for i in 0..30 {
-        if d_lengths[i] != 0 {
+    for len in d_lengths.iter().take(30) {
+        if *len != 0 {
             num_dist_codes += 1;
         }
         if num_dist_codes >= 2 {
@@ -1030,8 +1032,8 @@ mod tests {
     #[test]
     fn rle_long_histogram_matches_c() {
         let mut counts = [0usize; 288];
-        for i in 0..288 {
-            counts[i] = if i < 256 { (i * 17) % 23 } else { 0 };
+        for (i, count) in counts.iter_mut().enumerate() {
+            *count = if i < 256 { (i * 17) % 23 } else { 0 };
         }
         counts[256] = 1;
         counts[10] = 0;
@@ -1077,5 +1079,43 @@ mod tests {
         deflate_into(&opts(), 2, true, &[], &mut bp, &mut out);
         assert_eq!(out, vec![0x03, 0x00]);
         assert_eq!(bp, 2);
+    }
+
+    fn deflate_bytes(options: &Options, data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut bp = 0u8;
+        deflate_into(options, 2, true, data, &mut bp, &mut out);
+        out
+    }
+
+    #[test]
+    fn dynamic_blocks_match_c_compressor() {
+        let defaults = Options::default();
+        assert_eq!(deflate_bytes(&defaults, b"a"), vec![0x4b, 0x04, 0x00]);
+        assert_eq!(
+            deflate_bytes(&defaults, b"hello"),
+            vec![0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00]
+        );
+        assert_eq!(
+            deflate_bytes(&defaults, b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            vec![0x4b, 0x24, 0x00, 0x00]
+        );
+        assert_eq!(
+            deflate_bytes(&defaults, b"The quick brown fox jumps over the lazy dog"),
+            vec![
+                0x0b, 0xc9, 0x48, 0x55, 0x28, 0x2c, 0xcd, 0x4c, 0xce, 0x56, 0x48, 0x2a, 0xca, 0x2f,
+                0xcf, 0x53, 0x48, 0xcb, 0xaf, 0x50, 0xc8, 0x2a, 0xcd, 0x2d, 0x28, 0x56, 0xc8, 0x2f,
+                0x4b, 0x2d, 0x52, 0x28, 0x01, 0x4a, 0xe7, 0x24, 0x56, 0x55, 0x2a, 0xa4, 0xe4, 0xa7,
+                0x03, 0x00,
+            ]
+        );
+
+        let mut once = defaults;
+        once.numiterations = 1;
+        once.blocksplitting = 0;
+        assert_eq!(
+            deflate_bytes(&once, b"hello"),
+            vec![0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00]
+        );
     }
 }
