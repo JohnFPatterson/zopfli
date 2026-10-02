@@ -1,0 +1,16 @@
+[package]
+name = "zopfli-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Safe Rust port of libzopfli compression logic"
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+bumpalo = "3.19"
+crc32fast = { version = "1.5", default-features = false, features = ["std"] }
+log = "0.4"
+simd-adler32 = { version = "0.3", default-features = false, features = ["std"] }

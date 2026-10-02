@@ -20,9 +20,25 @@ ZOPFLIPNGLIB_OBJ := $(patsubst %.cc,obj/%.o,$(ZOPFLIPNGLIB_SRC))
 ZOPFLIPNGBIN_SRC := src/zopflipng/zopflipng_bin.cc
 ZOPFLIPNGBIN_OBJ := $(patsubst %.cc,obj/%.o,$(ZOPFLIPNGBIN_SRC))
 
-.PHONY: all libzopfli libzopflipng
+.PHONY: all libzopfli libzopflipng parity-bins parity asan-oracle
 
 all: zopfli libzopfli libzopfli.a zopflipng libzopflipng libzopflipng.a
+
+# C oracle + Rust driver for the differential parity gate.
+parity-bins: libzopfli.a
+	@mkdir -p build
+	$(CC) $(CFLAGS) -Isrc/zopfli tools/zopfli-oracle.c libzopfli.a -o build/oracle.tmp $(LDFLAGS) && mv build/oracle.tmp build/oracle
+	cargo build --release --target-dir target -p zopfli-driver -p zopfli-core -p zopfli-ffi
+
+parity: parity-bins
+	@mkdir -p build/parity-gate
+	printf '%s' '{"status":"completed","loop_count":0,"workspace_roots":["'"$(CURDIR)"'"]}' \
+	  | ./.cursor/hooks/c-rust-parity/parity_gate.py --force
+
+asan-oracle:
+	@mkdir -p build/asan
+	gcc -g -fsanitize=address,undefined -fno-omit-frame-pointer -O1 -Isrc/zopfli \
+	  tools/zopfli-oracle.c $(ZOPFLILIB_SRC) -o build/asan/oracle -lm
 
 obj/%.o: %.c
 	@mkdir -p `dirname $@`
