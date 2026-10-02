@@ -114,3 +114,12 @@ pub fn length_symbol_extra_bits(s: i32) -> i32 {
 pub fn dist_symbol_extra_bits(s: i32) -> i32 {
     DIST_SYMBOL_EXTRA_BITS[s as usize]
 }
+
+pub use dist_extra_bits as get_dist_extra_bits;
+pub use dist_extra_bits_value as get_dist_extra_bits_value;
+pub use dist_symbol as get_dist_symbol;
+pub use dist_symbol_extra_bits as get_dist_symbol_extra_bits;
+pub use length_extra_bits as get_length_extra_bits;
+pub use length_extra_bits_value as get_length_extra_bits_value;
+pub use length_symbol as get_length_symbol;
+pub use length_symbol_extra_bits as get_length_symbol_extra_bits;
