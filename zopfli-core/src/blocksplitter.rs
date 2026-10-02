@@ -200,7 +200,11 @@ pub fn block_split(
 }
 
 /// Equal-sized blocks. Includes `instart` and does not include `inend`.
-pub fn block_split_simple(instart: usize, inend: usize, blocksize: usize) -> Vec<usize> {
+///
+/// `ZopfliCompress` never calls `ZopfliBlockSplitSimple`; the helper stays for
+/// the unit tests that pin its C behavior.
+#[cfg(test)]
+fn block_split_simple(instart: usize, inend: usize, blocksize: usize) -> Vec<usize> {
     let mut splitpoints = Vec::new();
     let mut i = instart;
     while i < inend {

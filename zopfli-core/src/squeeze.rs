@@ -506,6 +506,10 @@ pub fn lz77_optimal(
             &mut costs,
         );
         let cost = calculate_block_size(&currentstore, 0, currentstore.size(), 2);
+        // C prints this to stderr only. It does not change the stored bytes.
+        if s.options.verbose_more != 0 || (s.options.verbose != 0 && cost < bestcost) {
+            eprintln!("Iteration {i}: {} bit", cost as i32);
+        }
         if cost < bestcost {
             store.copy_from(&currentstore);
             beststats = stats.clone();

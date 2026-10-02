@@ -110,6 +110,12 @@ pub fn gzip_compress(options: &Options, input: &[u8]) -> Vec<u8> {
     deflate_into(options, 2, true, input, &mut bp, &mut out);
     push_le_u32(&mut out, crcvalue);
     push_isize(&mut out, input.len());
+    if options.verbose != 0 && !input.is_empty() {
+        let insize = input.len();
+        let outsize = out.len();
+        let removed = 100.0 * (insize as f64 - outsize as f64) / insize as f64;
+        eprintln!("Original Size: {insize}, Gzip: {outsize}, Compression: {removed}% Removed");
+    }
     out
 }
 
@@ -133,6 +139,12 @@ pub fn zlib_compress(options: &Options, input: &[u8]) -> Vec<u8> {
     out.push(((checksum >> 16) % 256) as u8);
     out.push(((checksum >> 8) % 256) as u8);
     out.push((checksum % 256) as u8);
+    if options.verbose != 0 && !input.is_empty() {
+        let insize = input.len();
+        let outsize = out.len();
+        let removed = 100.0 * (insize as f64 - outsize as f64) / insize as f64;
+        eprintln!("Original Size: {insize}, Zlib: {outsize}, Compression: {removed}% Removed");
+    }
     out
 }
 
