@@ -78,9 +78,71 @@ pub extern "C" fn ZopfliInitOptions(options: *mut ZopfliOptions) {
     }
 }
 
-/// Compresses according to the given output format.
+fn release_prefix(ptr: *mut c_uchar) {
+    if ptr.is_null() {
+        return;
+    }
+    // SAFETY: ptr is a non-null malloc/realloc block the caller passed in.
+    unsafe { libc::free(ptr as *mut libc::c_void) };
+}
+
+/// Append `bytes` to the malloc'd dynamic array `*out` of length `*outsize`.
 ///
-/// Result buffer is allocated with `libc::malloc`; the caller must `free` it.
+/// A null `*out` starts empty; the incoming size is ignored in that case.
+/// On failure the previous block is released and both outputs are cleared.
+fn append_output(out: *mut *mut c_uchar, outsize: *mut size_t, bytes: &[u8]) -> bool {
+    let len = bytes.len();
+    if len == 0 {
+        // SAFETY: out is a non-null pointer to the caller buffer slot.
+        let old_ptr = unsafe { *out };
+        release_prefix(old_ptr);
+        write_failure(out, outsize);
+        return false;
+    }
+
+    // SAFETY: callers pass non-null out/outsize. *out is null or a malloc block
+    // whose first *outsize bytes are the prefix ZopfliCompress must keep.
+    let (old_ptr, prefix_len) = unsafe {
+        let old_ptr = *out;
+        if old_ptr.is_null() {
+            (old_ptr, 0)
+        } else {
+            (old_ptr, *outsize)
+        }
+    };
+
+    let Some(total) = prefix_len.checked_add(len) else {
+        release_prefix(old_ptr);
+        write_failure(out, outsize);
+        return false;
+    };
+
+    // SAFETY: old_ptr is null or a malloc/realloc block. realloc(NULL, total)
+    // allocates; otherwise the first prefix_len bytes stay intact.
+    let buf = unsafe { libc::realloc(old_ptr as *mut libc::c_void, total) as *mut c_uchar };
+    if buf.is_null() {
+        // realloc failed and left old_ptr allocated. Release it before clearing
+        // the outputs so a failed append does not leak the caller's block.
+        release_prefix(old_ptr);
+        write_failure(out, outsize);
+        return false;
+    }
+
+    // SAFETY: buf has `total` writable bytes. `bytes` has `len` bytes and does
+    // not alias buf. out/outsize are non-null and writable.
+    unsafe {
+        ptr::copy_nonoverlapping(bytes.as_ptr(), buf.add(prefix_len), len);
+        *out = buf;
+        *outsize = total;
+    }
+    true
+}
+
+/// Compresses according to the given output format and appends the result.
+///
+/// `*out` is a `malloc`'d dynamic array of `*outsize` bytes (null to start).
+/// Existing bytes are kept and the compressed bytes are appended. The caller
+/// must `free` `*out`.
 #[no_mangle]
 pub extern "C" fn ZopfliCompress(
     options: *const ZopfliOptions,
@@ -121,24 +183,71 @@ pub extern "C" fn ZopfliCompress(
         }
     };
 
-    let len = compressed.len();
-    if len == 0 {
-        write_failure(out, outsize);
-        return;
+    append_output(out, outsize, &compressed);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn finish(out: *mut c_uchar, outsize: size_t) -> Vec<u8> {
+        if out.is_null() {
+            return Vec::new();
+        }
+        // SAFETY: out is a malloc block of outsize bytes produced by append_output.
+        let owned = unsafe { slice::from_raw_parts(out, outsize).to_vec() };
+        // SAFETY: out was allocated with malloc/realloc and is not used again.
+        unsafe { libc::free(out as *mut libc::c_void) };
+        owned
     }
 
-    // SAFETY: malloc returns either null or a writable block of `len` bytes.
-    let buf = unsafe { libc::malloc(len) as *mut c_uchar };
-    if buf.is_null() {
-        write_failure(out, outsize);
-        return;
+    #[test]
+    fn append_starts_from_null() {
+        let mut out: *mut c_uchar = ptr::null_mut();
+        let mut outsize: size_t = 0;
+        assert!(append_output(&mut out, &mut outsize, &[1, 2, 3]));
+        assert_eq!(finish(out, outsize), vec![1, 2, 3]);
     }
 
-    // SAFETY: buf is newly allocated with `len` bytes; compressed has `len` bytes;
-    // out/outsize are non-null writable pointers.
-    unsafe {
-        ptr::copy_nonoverlapping(compressed.as_ptr(), buf, len);
-        *out = buf;
-        *outsize = len;
+    #[test]
+    fn append_keeps_existing_prefix() {
+        let prefix = [9_u8, 8, 7];
+        // SAFETY: malloc returns null or a writable block of prefix.len() bytes.
+        let mut out = unsafe { libc::malloc(prefix.len()) as *mut c_uchar };
+        assert!(!out.is_null());
+        // SAFETY: out has prefix.len() writable bytes and does not alias prefix.
+        unsafe { ptr::copy_nonoverlapping(prefix.as_ptr(), out, prefix.len()) };
+        let mut outsize: size_t = prefix.len();
+
+        assert!(append_output(&mut out, &mut outsize, &[1, 2, 3, 4]));
+        assert_eq!(finish(out, outsize), vec![9, 8, 7, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn append_concatenates_successive_results() {
+        let mut out: *mut c_uchar = ptr::null_mut();
+        let mut outsize: size_t = 0;
+        assert!(append_output(&mut out, &mut outsize, &[1, 2]));
+        assert!(append_output(&mut out, &mut outsize, &[3, 4, 5]));
+        assert_eq!(finish(out, outsize), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn null_out_ignores_stale_size() {
+        let mut out: *mut c_uchar = ptr::null_mut();
+        let mut outsize: size_t = 42;
+        assert!(append_output(&mut out, &mut outsize, &[7, 8]));
+        assert_eq!(finish(out, outsize), vec![7, 8]);
+    }
+
+    #[test]
+    fn empty_append_releases_prefix() {
+        // SAFETY: malloc returns null or a writable block of 4 bytes.
+        let mut out = unsafe { libc::malloc(4) as *mut c_uchar };
+        assert!(!out.is_null());
+        let mut outsize: size_t = 4;
+        assert!(!append_output(&mut out, &mut outsize, &[]));
+        assert!(out.is_null());
+        assert_eq!(outsize, 0);
     }
 }
