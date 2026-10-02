@@ -182,17 +182,13 @@ impl Lz77Store {
     fn histogram_at(&self, lpos: usize, ll_counts: &mut [usize], d_counts: &mut [usize]) {
         let llpos = NUM_LL * (lpos / NUM_LL);
         let dpos = NUM_D * (lpos / NUM_D);
-        for i in 0..NUM_LL {
-            ll_counts[i] = self.ll_counts[llpos + i];
-        }
+        ll_counts[..NUM_LL].copy_from_slice(&self.ll_counts[llpos..llpos + NUM_LL]);
         let ll_end = (llpos + NUM_LL).min(self.size());
         for i in (lpos + 1)..ll_end {
             let sym = usize::from(self.ll_symbol[i]);
             ll_counts[sym] = ll_counts[sym].wrapping_sub(1);
         }
-        for i in 0..NUM_D {
-            d_counts[i] = self.d_counts[dpos + i];
-        }
+        d_counts[..NUM_D].copy_from_slice(&self.d_counts[dpos..dpos + NUM_D]);
         let d_end = (dpos + NUM_D).min(self.size());
         for i in (lpos + 1)..d_end {
             if self.dists[i] != 0 {
@@ -301,7 +297,7 @@ fn try_get_from_longest_match_cache(
     s: &BlockState,
     pos: usize,
     limit: &mut usize,
-    mut sublen: Option<&mut [u16]>,
+    sublen: Option<&mut [u16]>,
     distance: &mut u16,
     length: &mut u16,
 ) -> bool {
@@ -317,7 +313,7 @@ fn try_get_from_longest_match_cache(
     let limit_ok_for_cache = cache_available
         && (*limit == MAX_MATCH
             || usize::from(cached_length) <= *limit
-            || (sublen.is_some() && usize::from(max_sub) >= *limit));
+            || (sublen.is_some() && (max_sub as usize) >= *limit));
 
     if limit_ok_for_cache && cache_available {
         if sublen.is_none() || u32::from(cached_length) <= max_sub {
@@ -325,7 +321,7 @@ fn try_get_from_longest_match_cache(
             if usize::from(*length) > *limit {
                 *length = *limit as u16;
             }
-            if let Some(sublen) = sublen.as_deref_mut() {
+            if let Some(sublen) = sublen {
                 lmc.cache_to_sublen(lmcpos, usize::from(*length), sublen);
                 *distance = sublen[usize::from(*length)];
                 if *limit == MAX_MATCH && usize::from(*length) >= MIN_MATCH {
@@ -723,12 +719,13 @@ mod tests {
         assert_eq!(full_ll, manual_ll);
         assert_eq!(full_d, manual_d);
 
+        // `1 + NUM_LL * 3 == total`, so this is the subtract path with lstart > 0.
         let mut mid_ll = [0usize; NUM_LL];
         let mut mid_d = [0usize; NUM_D];
-        store.histogram(10, total, &mut mid_ll, &mut mid_d);
+        store.histogram(1, total, &mut mid_ll, &mut mid_d);
         let mut mid_manual_ll = [0usize; NUM_LL];
         let mut mid_manual_d = [0usize; NUM_D];
-        for i in 10..total {
+        for i in 1..total {
             mid_manual_ll[usize::from(store.ll_symbol[i])] += 1;
             if store.dists[i] != 0 {
                 mid_manual_d[usize::from(store.d_symbol[i])] += 1;
