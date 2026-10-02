@@ -30,7 +30,8 @@ removing it, or changing its driver_args or fixtures is then a gate problem.
 reports go: the full compare and `stop` write parity-report.{md,json}; module
 runs (subagentStop, --module) write parity-report.modules.{md,json}.
 
-State lives outside the repo in ./state/<sha256 of repo path>.json:
+State lives in ./state/<sha256 of repo path>.json next to this script. That
+directory is excluded from the tree hash, so writing it cannot bust reuse:
   - oracle_pins:  sha256 of every file matched by `oracle_sources`
   - fixture_pins: sha256 of every fixture ever seen, top-level and module globs
                   (fixtures may be added, never removed or edited)
@@ -75,6 +76,7 @@ Known limits:
 """
 from __future__ import annotations
 
+import fcntl
 import fnmatch
 import glob
 import hashlib
@@ -84,6 +86,7 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 from pathlib import Path
@@ -430,6 +433,22 @@ def state_path(root: Path) -> Path:
     return STATE_DIR / (hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:32] + ".json")
 
 
+def state_hash_excludes(root: Path) -> list[str]:
+    """Globs for the pin-state directory when it lies inside `root`.
+
+    The directory sits next to this script. A workspace that vendors the hook
+    would otherwise hash the state file, which stores `tree_hash`, so the next
+    stop would never match `last` and the unchanged-tree reuse path would not run.
+    """
+    try:
+        rel = STATE_DIR.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return []
+    if not rel or rel == ".":
+        return []
+    return [glob.escape(rel) + "/**"]
+
+
 def load_state(root: Path) -> tuple[dict[str, Any], str | None]:
     path = state_path(root)
     if not path.exists():
@@ -443,13 +462,82 @@ def load_state(root: Path) -> tuple[dict[str, Any], str | None]:
     return data, None
 
 
-def save_state(root: Path, state: dict[str, Any]) -> None:
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _pins_match_disk(disk: dict[str, Any], ours: dict[str, Any]) -> bool:
+    """True when every pin already on disk is present unchanged in `ours`."""
+    for key in ("oracle_pins", "fixture_pins", "module_pins"):
+        disk_pins, our_pins = _mapping(disk.get(key)), _mapping(ours.get(key))
+        for name, value in disk_pins.items():
+            if our_pins.get(name) != value:
+                return False
+    return True
+
+
+def _union_pins(disk: dict[str, Any], ours: dict[str, Any]) -> dict[str, Any]:
+    """Pins only grow. A hash already stored on disk stays the pin."""
+    merged = dict(disk)
+    merged["repo"] = ours["repo"]
+    for key in ("oracle_pins", "fixture_pins", "module_pins"):
+        if key not in disk and key not in ours:
+            continue
+        base = _mapping(disk.get(key))
+        for name, value in _mapping(ours.get(key)).items():
+            if name not in base:
+                base[name] = value
+        merged[key] = base
+    return merged
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def save_state(root: Path, state: dict[str, Any], *, updated_cache: str | None) -> None:
+    """Persist pins and the one cache entry this run owns.
+
+    `updated_cache` is None when this run replaced `state["last"]` (a full
+    compare). Otherwise it is the `last_modules` key this run replaced.
+    Callers overlap for up to BUDGET_S, so the write takes an exclusive lock
+    and a private temp file. Pin maps are unioned; an existing pin hash is kept.
+    A snapshot that disagrees with pins already on disk does not publish its
+    cache entry. The next stop recomputes instead of reusing a verdict those
+    pins do not support.
+    """
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     state["repo"] = str(root)
     path = state_path(root)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    lock_path = path.with_suffix(".lock")
+    with lock_path.open("a+") as lockf:
+        fcntl.flock(lockf.fileno(), fcntl.LOCK_EX)
+        try:
+            disk, _problem = load_state(root)
+            merged = _union_pins(disk, state)
+            if _pins_match_disk(disk, state):
+                if updated_cache is None:
+                    if "last" in state:
+                        merged["last"] = state["last"]
+                else:
+                    last_modules = _mapping(disk.get("last_modules"))
+                    incoming = _mapping(state.get("last_modules")).get(updated_cache)
+                    if incoming is not None:
+                        last_modules[updated_cache] = incoming
+                    merged["last_modules"] = last_modules
+            _write_json_atomic(path, merged)
+        finally:
+            fcntl.flock(lockf.fileno(), fcntl.LOCK_UN)
 
 
 # ---------------------------------------------------------------- running
@@ -842,7 +930,7 @@ def gate_root(root: Path, force: bool, event: str = "stop", module_sel: list[str
     md_path, json_path = report_paths(rbase, kind == "modules")
 
     deadline = Deadline(BUDGET_S)
-    excludes = BASE_HASH_EXCLUDE + report_excludes(cfg) + cfg["hash_exclude"]
+    excludes = BASE_HASH_EXCLUDE + report_excludes(cfg) + cfg["hash_exclude"] + state_hash_excludes(root)
     files = list_files(root)
     th = hashlib.sha256()
     th.update(f"v{HOOK_VERSION}:{sha256_file(HOOK_PATH)}\n".encode())
@@ -952,9 +1040,6 @@ def gate_root(root: Path, force: bool, event: str = "stop", module_sel: list[str
         ))
     planned = sum(len(u[2]) for u in units)
 
-    if same_executable(root, cfg["c_cmd"][0], cfg["rust_cmd"][0]):
-        problems.append("`c_cmd` and `rust_cmd` run the same executable")
-
     method: dict[str, Any] = {
         "build": "(none)",
         "c_cmd": f"`{argv_str(cfg['c_cmd'])}`",
@@ -988,6 +1073,10 @@ def gate_root(root: Path, force: bool, event: str = "stop", module_sel: list[str
             build_ok = False
             out = b.stdout.decode("utf-8", "replace") + "\n" + b.stderr.decode("utf-8", "replace")
             problems.append(f"build failed ({b.start_error or b.status()}): `{argv_str(cfg['build'])}`\n{tail(out)}")
+
+    # After build. The binary may not exist until this step, and a build can link both commands at one path.
+    if same_executable(root, cfg["c_cmd"][0], cfg["rust_cmd"][0]):
+        problems.append("`c_cmd` and `rust_cmd` run the same executable")
 
     results: list[tuple[str | None, str, RunResult, RunResult]] = []
     noun = "fixtures" if kind == "full" else "module runs"
@@ -1174,7 +1263,7 @@ def gate_root(root: Path, force: bool, event: str = "stop", module_sel: list[str
     else:
         last_modules[cache_key] = entry
         state["last_modules"] = last_modules
-    save_state(root, state)
+    save_state(root, state, updated_cache=None if kind == "full" else cache_key)
     log(f"{root}: {verdict}: {summary}")
     return followup
 
