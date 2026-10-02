@@ -139,31 +139,30 @@ pub fn compress(
     let mut out = Vec::new();
     match format {
         Format::Gzip => {
-            let mut enc = GzipEncoder::new_buffered(algo, BlockType::Dynamic, &mut out)
+            let mut enc = GzipEncoder::new(algo, BlockType::Dynamic, &mut out)
                 .map_err(|_| CompressError::CompressFailed)?;
-            std::io::copy(&mut &*input, &mut enc).map_err(|_| CompressError::Io)?;
-            enc.into_inner()
-                .map_err(|_| CompressError::Io)?
-                .finish()
-                .map_err(|_| CompressError::CompressFailed)?;
+            write_master_blocks(&mut enc, input)?;
+            enc.finish().map_err(|_| CompressError::CompressFailed)?;
         }
         Format::Zlib => {
-            let mut enc = ZlibEncoder::new_buffered(algo, BlockType::Dynamic, &mut out)
+            let mut enc = ZlibEncoder::new(algo, BlockType::Dynamic, &mut out)
                 .map_err(|_| CompressError::CompressFailed)?;
-            std::io::copy(&mut &*input, &mut enc).map_err(|_| CompressError::Io)?;
-            enc.into_inner()
-                .map_err(|_| CompressError::Io)?
-                .finish()
-                .map_err(|_| CompressError::CompressFailed)?;
+            write_master_blocks(&mut enc, input)?;
+            enc.finish().map_err(|_| CompressError::CompressFailed)?;
         }
         Format::Deflate => {
-            let mut enc = DeflateEncoder::new_buffered(algo, BlockType::Dynamic, &mut out);
-            std::io::copy(&mut &*input, &mut enc).map_err(|_| CompressError::Io)?;
-            enc.into_inner()
-                .map_err(|_| CompressError::Io)?
-                .finish()
-                .map_err(|_| CompressError::CompressFailed)?;
+            let mut enc = DeflateEncoder::new(algo, BlockType::Dynamic, &mut out);
+            write_master_blocks(&mut enc, input)?;
+            enc.finish().map_err(|_| CompressError::CompressFailed)?;
         }
     }
     Ok(out)
+}
+
+/// Feed `input` to `writer` in C `ZopfliDeflate` master-block slices.
+fn write_master_blocks<W: Write>(writer: &mut W, input: &[u8]) -> Result<(), CompressError> {
+    for chunk in input.chunks(util::ZOPFLI_MASTER_BLOCK_SIZE) {
+        writer.write_all(chunk).map_err(|_| CompressError::Io)?;
+    }
+    Ok(())
 }

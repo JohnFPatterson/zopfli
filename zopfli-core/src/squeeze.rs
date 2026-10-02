@@ -504,11 +504,14 @@ pub fn lz77_optimal<C: Cache>(
             stats = add_weighed_stat_freqs(&stats, 1.0, &laststats, 0.5);
             stats.calculate_entropy();
         }
-        if current_iteration > 5 && (cost - lastcost).abs() < f64::EPSILON {
+        /* `current_iteration` was already incremented. C tests the pre-increment
+        index (`i > 5`), so randomization first becomes possible on the 7th run. */
+        let iteration = current_iteration - 1;
+        if iteration > 5 && (cost - lastcost).abs() < f64::EPSILON {
             stats = beststats;
             stats.randomize_stat_freqs(&mut ran_state);
             stats.calculate_entropy();
-            lastrandomstep = current_iteration;
+            lastrandomstep = iteration;
         }
         lastcost = cost;
     }

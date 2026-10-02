@@ -160,7 +160,8 @@ pub fn blocksplit_lz77(lz77: &Lz77Store, maxblocks: u16, splitpoints: &mut Vec<u
     let mut lstart = 0;
     let mut lend = lz77.size();
 
-    while maxblocks != 0 && numblocks < u32::from(maxblocks) {
+    /* C stops only when `maxblocks > 0 && numblocks >= maxblocks` (0 = unlimited). */
+    while maxblocks == 0 || numblocks < u32::from(maxblocks) {
         debug_assert!(lstart < lend);
         let find_minimum_result = find_minimum(
             |i| estimate_cost(lz77, lstart, i) + estimate_cost(lz77, i, lend),
