@@ -6,7 +6,7 @@
 use libc::{c_int, c_uchar, size_t};
 use std::ptr;
 use std::slice;
-use zopfli_core::{Format, Options};
+use zopfli_core::{Format, ZopfliOptions as CoreOptions};
 
 /// Options used throughout the program. Field order matches C `ZopfliOptions`.
 #[repr(C)]
@@ -29,9 +29,9 @@ pub enum ZopfliFormat {
     Deflate = 2,
 }
 
-impl From<ZopfliOptions> for Options {
+impl From<ZopfliOptions> for CoreOptions {
     fn from(opts: ZopfliOptions) -> Self {
-        Options {
+        CoreOptions {
             verbose: opts.verbose,
             verbose_more: opts.verbose_more,
             numiterations: opts.numiterations,
@@ -51,21 +51,16 @@ fn map_format(output_type: c_int) -> Option<Format> {
     }
 }
 
-fn write_failure(out: *mut *mut c_uchar, outsize: *mut size_t) {
-    // SAFETY: caller guarantees out/outsize are valid writable pointers when non-null.
-    unsafe {
-        *out = ptr::null_mut();
-        *outsize = 0;
-    }
-}
-
 /// Initializes options with default values (same as C `ZopfliInitOptions`).
+///
+/// # Safety
+/// `options` must be null or point to a valid writable `ZopfliOptions`.
 #[no_mangle]
-pub extern "C" fn ZopfliInitOptions(options: *mut ZopfliOptions) {
+pub unsafe extern "C" fn ZopfliInitOptions(options: *mut ZopfliOptions) {
     if options.is_null() {
         return;
     }
-    // SAFETY: options is non-null and points to a writable ZopfliOptions.
+    // SAFETY: caller promised `options` is writable for one `ZopfliOptions`.
     unsafe {
         *options = ZopfliOptions {
             verbose: 0,
@@ -81,8 +76,13 @@ pub extern "C" fn ZopfliInitOptions(options: *mut ZopfliOptions) {
 /// Compresses according to the given output format.
 ///
 /// Result buffer is allocated with `libc::malloc`; the caller must `free` it.
+///
+/// # Safety
+/// - `options` must be non-null and readable for the duration of the call.
+/// - `out` and `outsize` must be non-null and writable.
+/// - If `insize != 0`, `in_data` must point to `insize` readable bytes.
 #[no_mangle]
-pub extern "C" fn ZopfliCompress(
+pub unsafe extern "C" fn ZopfliCompress(
     options: *const ZopfliOptions,
     output_type: ZopfliFormat,
     in_data: *const c_uchar,
@@ -95,47 +95,67 @@ pub extern "C" fn ZopfliCompress(
     }
 
     if in_data.is_null() && insize != 0 {
-        write_failure(out, outsize);
+        // SAFETY: out/outsize checked non-null above.
+        unsafe {
+            *out = ptr::null_mut();
+            *outsize = 0;
+        }
         return;
     }
 
     let Some(format) = map_format(output_type as c_int) else {
-        write_failure(out, outsize);
+        // SAFETY: out/outsize checked non-null above.
+        unsafe {
+            *out = ptr::null_mut();
+            *outsize = 0;
+        }
         return;
     };
 
     let input: &[u8] = if insize == 0 || in_data.is_null() {
         &[]
     } else {
-        // SAFETY: in_data is non-null and insize bytes are readable for this call.
+        // SAFETY: caller promised `in_data` points to `insize` readable bytes.
         unsafe { slice::from_raw_parts(in_data, insize) }
     };
 
-    // SAFETY: options is non-null and points to a valid ZopfliOptions for this call.
-    let opts = Options::from(unsafe { *options });
+    // SAFETY: caller promised `options` is readable.
+    let opts = CoreOptions::from(unsafe { *options });
     let compressed = match zopfli_core::compress(&opts, format, input) {
         Ok(bytes) => bytes,
         Err(_) => {
-            write_failure(out, outsize);
+            // SAFETY: out/outsize checked non-null above.
+            unsafe {
+                *out = ptr::null_mut();
+                *outsize = 0;
+            }
             return;
         }
     };
 
     let len = compressed.len();
     if len == 0 {
-        write_failure(out, outsize);
+        // SAFETY: out/outsize checked non-null above.
+        unsafe {
+            *out = ptr::null_mut();
+            *outsize = 0;
+        }
         return;
     }
 
-    // SAFETY: malloc returns either null or a writable block of `len` bytes.
+    // SAFETY: malloc returns null or a block of at least `len` bytes.
     let buf = unsafe { libc::malloc(len) as *mut c_uchar };
     if buf.is_null() {
-        write_failure(out, outsize);
+        // SAFETY: out/outsize checked non-null above.
+        unsafe {
+            *out = ptr::null_mut();
+            *outsize = 0;
+        }
         return;
     }
 
-    // SAFETY: buf is newly allocated with `len` bytes; compressed has `len` bytes;
-    // out/outsize are non-null writable pointers.
+    // SAFETY: `buf` has `len` writable bytes; `compressed` has `len` bytes;
+    // `out`/`outsize` are non-null writable pointers.
     unsafe {
         ptr::copy_nonoverlapping(compressed.as_ptr(), buf, len);
         *out = buf;

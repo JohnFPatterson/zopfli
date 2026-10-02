@@ -1,0 +1,45 @@
+{
+  "fixture_pins": {
+    "tests/inputs/bytes_256.bin": "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880",
+    "tests/inputs/empty.bin": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tests/inputs/hello.txt": "ab92d241fbd3904d57b03ef5efe626df5748f1dfce9e6819ce913756841d1300",
+    "tests/inputs/pattern_1k.bin": "04ccb633ffcaf9c517f7a22a4e45b7917046aa85419f6da283c26b91f435d427",
+    "tests/inputs/repeat_a64.txt": "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb",
+    "tests/inputs/text_lines.txt": "58958c31736cc121ead21afe24b31b85e2df9e5f941d0e125f91ba49a3a8fbdd",
+    "tests/inputs/zeros_512.bin": "076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560"
+  },
+  "last": {
+    "followup": "",
+    "tree_hash": "a329436b9ddcfbea1bdbe30293daaea0387777c09f278259d776c7df524cf19f",
+    "verdict": "PASS"
+  },
+  "oracle_pins": {
+    "src/zopfli/blocksplitter.c": "e75ecc73c4c45d266924963b9f322c7fa84d0512e27e90004c9b186911a59c20",
+    "src/zopfli/blocksplitter.h": "3db4f4b63fa25f4c135c8438d880a4be9ae7403b40a4ed1a1fd5f461be7dda06",
+    "src/zopfli/cache.c": "93b0aa533ae32d5c77977bbfec92298727a456d74083e74c690243fc2ec92874",
+    "src/zopfli/cache.h": "1c041868ad624b37736b52db0af81562a6c0fdb163f459315ea596e8552770a8",
+    "src/zopfli/deflate.c": "5b35044bd740af59d6f2c3ca5fdac118357a13a178133f282ab0833c28db7425",
+    "src/zopfli/deflate.h": "fa62fff6aab5e047412eb9a46e7972c91a17a9bcd230adddd4ce44df2a00e8b4",
+    "src/zopfli/gzip_container.c": "fbc4440d49efe72c8606a94e9c639ba0158eafe5ae8dcc03e5f19732b8a6cb63",
+    "src/zopfli/gzip_container.h": "8d687a588f5638965e4881802a30a547601b32ea7cb686218afbfb25ef1f0f42",
+    "src/zopfli/hash.c": "e0c8ea7a44b230de73ebc749ae23a21e5cbaf72ab5cd6946c5f9b2de5bfd86d5",
+    "src/zopfli/hash.h": "51ea819f5e8d64ca6ee4498abc7b57a1053d93fd21df14b8c93a20c9186be4a2",
+    "src/zopfli/katajainen.c": "a06e74fd04150ef0d3da81abdf9608a2b482dcfe053beac2aced98a69acfbd77",
+    "src/zopfli/katajainen.h": "eaf4b6da83c24bc341612f8ccbad2b10287bc1242e2b4a75b950fdaf805e2d69",
+    "src/zopfli/lz77.c": "fa207873b711a6bb4d271912dfa088a341f352c59accd0599a583ce7e817512c",
+    "src/zopfli/lz77.h": "9d3ac03cfb94c2b1a1eb6d4bf9044dc4f86436f062699828bce8a103fb8ef12c",
+    "src/zopfli/squeeze.c": "71e6c18331c682fe06377c8a45f43bee35abc39f6a6ad6bb7dd365c5ae2d49a3",
+    "src/zopfli/squeeze.h": "47db13efe62c0876e4ea53004885b96327f40cf0b9c6107a74f9ef94c1e0235a",
+    "src/zopfli/symbols.h": "2ab04edd4c135b46a8255ac766040c37a5f10c3b2f908a255e68db3d7c53056f",
+    "src/zopfli/tree.c": "5ecbbffeb1e6fd046ad40dfadeb2e42f9d909c76cb1f8554eb46b79958ad6324",
+    "src/zopfli/tree.h": "396977e269ee143a0c5fa3393fe002f78a605c525f35a9e4fa5ac2250bfd0a07",
+    "src/zopfli/util.c": "84bb4c5e6a04ee55feee3550225b3cff59fea8cf1a32fe20b63afd679d26d926",
+    "src/zopfli/util.h": "72730de4d23c65de01057c8c8167bb90364999a6914c1520c20c4837afa5db73",
+    "src/zopfli/zlib_container.c": "999e51750a075717fb1b6256c3071454193534cc048dc9bb125e2b59b7de18c4",
+    "src/zopfli/zlib_container.h": "7744d8afea2acca76c8e9f823c4f8df3c7545ec8c9fbe0ea14b67d35f5f7c52f",
+    "src/zopfli/zopfli.h": "9cff9d2ed11be71b8bc82aed0afd2ed47391609c138ae2bb3dc18730e62ddcb1",
+    "src/zopfli/zopfli_bin.c": "d2a6c1712644cdf40239a20fdb6df00703d4979a6e26fb70578c590fc05041e0",
+    "src/zopfli/zopfli_lib.c": "04767d6502059ebb9f79cd35484842cf6a1ccc925de74a0711f4528289509d71"
+  },
+  "repo": "/workspace"
+}

@@ -3,7 +3,7 @@
 use std::env;
 use std::fs;
 use std::process;
-use zopfli_core::{compress, Format, Options};
+use zopfli_core::{compress, Format, ZopfliOptions};
 
 const MAX_INPUT: usize = 4096;
 
@@ -18,7 +18,7 @@ fn print_hex(data: &[u8]) {
     println!();
 }
 
-fn emit(name: &str, format: Format, opt: &Options, input: &[u8]) -> Result<(), i32> {
+fn emit(name: &str, format: Format, opt: &ZopfliOptions, input: &[u8]) -> Result<(), i32> {
     let out = compress(opt, format, input).map_err(|_| 1)?;
     if out.is_empty() {
         eprintln!("compress failed for {name}");
@@ -69,26 +69,28 @@ fn main() {
         process::exit(0);
     }
 
-    let mut opt = Options::default();
-    opt.numiterations = 1;
-    opt.verbose = 0;
-    opt.verbose_more = 0;
+    let opt = ZopfliOptions {
+        numiterations: 1,
+        verbose: 0,
+        verbose_more: 0,
+        ..ZopfliOptions::default()
+    };
 
     let mut rc = 0;
-    if want_section(&sections, "gzip") {
-        if emit("gzip", Format::Gzip, &opt, &input).is_err() {
-            rc = 1;
-        }
+    if want_section(&sections, "gzip") && emit("gzip", Format::Gzip, &opt, &input).is_err() {
+        rc = 1;
     }
-    if rc == 0 && want_section(&sections, "zlib") {
-        if emit("zlib", Format::Zlib, &opt, &input).is_err() {
-            rc = 1;
-        }
+    if rc == 0
+        && want_section(&sections, "zlib")
+        && emit("zlib", Format::Zlib, &opt, &input).is_err()
+    {
+        rc = 1;
     }
-    if rc == 0 && want_section(&sections, "deflate") {
-        if emit("deflate", Format::Deflate, &opt, &input).is_err() {
-            rc = 1;
-        }
+    if rc == 0
+        && want_section(&sections, "deflate")
+        && emit("deflate", Format::Deflate, &opt, &input).is_err()
+    {
+        rc = 1;
     }
     process::exit(rc);
 }

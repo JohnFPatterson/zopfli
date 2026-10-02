@@ -35,10 +35,10 @@ parity: parity-bins
 	printf '%s' '{"status":"completed","loop_count":0,"workspace_roots":["'"$(CURDIR)"'"]}' \
 	  | ./.cursor/hooks/c-rust-parity/parity_gate.py --force
 
-asan-oracle: libzopfli.a
+asan-oracle:
 	@mkdir -p build/asan
-	$(CC) -g -fsanitize=address,undefined -fno-omit-frame-pointer -O1 -Isrc/zopfli \
-	  tools/zopfli-oracle.c $(ZOPFLILIB_SRC) -o build/asan/oracle $(LDFLAGS) -lm
+	gcc -g -fsanitize=address,undefined -fno-omit-frame-pointer -O1 -Isrc/zopfli \
+	  tools/zopfli-oracle.c $(ZOPFLILIB_SRC) -o build/asan/oracle -lm
 
 obj/%.o: %.c
 	@mkdir -p `dirname $@`
