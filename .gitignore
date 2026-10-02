@@ -1,0 +1,10 @@
+
+# Rust / parity
+/target/
+/build/
+/obj/
+*.a
+libzopfli.so*
+libzopflipng.so*
+/zopfli
+/zopflipng

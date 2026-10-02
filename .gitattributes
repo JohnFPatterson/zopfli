@@ -1,0 +1,3 @@
+# Fixture and pin safety: keep bytes exact (wins over any later text=auto).
+/tests/inputs/**    -text
+/tests/parity/**    -text

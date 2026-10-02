@@ -1,0 +1,13 @@
+[package]
+name = "zopfli-driver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Differential parity driver for zopfli-core"
+
+[[bin]]
+name = "zopfli-driver"
+path = "src/main.rs"
+
+[dependencies]
+zopfli-core = { path = "../zopfli-core" }

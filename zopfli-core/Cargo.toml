@@ -1,0 +1,8 @@
+[package]
+name = "zopfli-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Safe Rust port of libzopfli compression logic"
+
+[dependencies]

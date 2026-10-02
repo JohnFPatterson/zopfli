@@ -1,0 +1,17 @@
+{
+  "$comment": "libzopfli C-to-Rust parity gate. build builds C oracle + Rust driver.",
+  "build": ["make", "parity-bins"],
+  "c_cmd": ["./build/oracle", "{input}"],
+  "rust_cmd": ["./target/release/zopfli-driver", "{input}"],
+  "input_mode": "arg",
+  "fixtures": ["tests/inputs/**/*"],
+  "report_dir": "build/parity-gate",
+  "oracle_sources": ["src/zopfli/*.c", "src/zopfli/*.h"],
+  "exceptions_file": "PARITY_EXCEPTIONS.md",
+  "exceptions_rs": ["zopfli-core/tests/exceptions.rs"],
+  "exceptions_test": ["cargo", "test", "-p", "zopfli-core", "--test", "exceptions", "--target-dir", "target"],
+  "per_run_timeout_s": 30,
+  "build_timeout_s": 600,
+  "compare_stderr": false,
+  "hash_exclude": ["build/**", "target/**", "obj/**"]
+}
