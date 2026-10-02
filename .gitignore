@@ -8,3 +8,4 @@ libzopfli.so*
 libzopflipng.so*
 /zopfli
 /zopflipng
+.cursor/hooks/c-rust-parity/state/
